@@ -1,0 +1,6 @@
+- `finish_reason` 见过哪些取值（`stop` / `tool_calls` / `length` / 别的小写变体）
+- `tool_calls[].function.arguments` 是 **JSON 字符串**还是 dict
+- 工具结果回传用的是 `role="tool"` 还是别的（Anthropic 系是 `user` + `tool_result` block）
+- 一次响应会不会**并行返回多个** tool_calls
+- **流式下 `arguments` 是分片累积的**（第一片有 `id`，后续只有 `index` + 增量字符串）→ 必须自己拼
+- 报错长什么样：打一次超时/错 key，看异常类型和 message 格式
