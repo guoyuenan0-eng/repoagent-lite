@@ -10,6 +10,8 @@ from dotenv import load_dotenv
 from repoagent.llm import LLM, TruncatedToolCallError
 from repoagent.state import ToolCall, ToolResult, StopReason, SessionState, Message, Status, Step
 from repoagent.tool import ToolRegistry, Tool, read_file
+from repoagent.context.manager import *
+from repoagent.context.manager import build_context as _build_ctx
 import logging
 
 log = logging.getLogger(__name__)
@@ -39,7 +41,7 @@ registry.register(Tool(
 
 
 def build_context(messages):
-    return messages
+    return _build_ctx(messages)
 
 def execute_tools(calls: list[ToolCall], registry: ToolRegistry):
     result = []
@@ -143,6 +145,19 @@ def run(state: SessionState, task: str, llm: LLM,
             trace.flush()
     finally:
         trace.close()
+
+def test_parallel_tool_calls_are_compressed():
+    """一步内 20 个并行工具调用，是一组 21 条 —— 压缩不能因为组数少就跳过。"""
+    msgs = [Message(role="user", content="读 20 个文件")]
+    msgs.append(Message(role="assistant", content="", tool_calls=[
+        ToolCall(id=f"c{i}", name="read_file", args={"path": f"f{i}.txt"}) for i in range(20)
+    ]))
+    for i in range(20):
+        msgs.append(Message(role="tool", content="填充内容。" * 800, tool_call_id=f"c{i}"))
+
+    assert len(group_turns(msgs)) == 2          # 确认这就是 1 个大组
+    out = _build_ctx(msgs)
+    assert estimate_messages(out) < 20_000, "并行工具调用也必须被进预算"
 
 if __name__ == "__main__":
     load_dotenv()
