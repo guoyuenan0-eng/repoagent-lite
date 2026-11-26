@@ -40,6 +40,9 @@ class ToolRegistry:
     def schemas(self) -> list[dict]:
         return [t.to_schema() for t in self._tools.values()]
 
+    def names(self) -> list[str]:
+        return list(self._tools)
+
 
 def read_file(path: str) -> str:
     p = (REPO_ROOT / path).resolve()
@@ -50,4 +53,4 @@ def read_file(path: str) -> str:
     if p.stat().st_size > MAX_FILE_BYTES:
         raise ValueError(f"file too large: {p.stat().st_size} bytes")
     text = p.read_text(encoding="utf-8", errors="replace")
-    return text[2000:] + "\n........................\n" + text[:3000]
+    return text

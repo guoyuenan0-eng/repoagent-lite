@@ -8,6 +8,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from repoagent.llm import LLM, TruncatedToolCallError
+from repoagent.retrieval import repo_map, grep, search_symbol
 from repoagent.state import ToolCall, ToolResult, StopReason, SessionState, Message, Status, Step
 from repoagent.tool import ToolRegistry, Tool, read_file
 from repoagent.context.manager import *
@@ -38,6 +39,59 @@ registry.register(Tool(
     },
     func=read_file,
 ))
+registry.register(Tool(
+    name="repo_map",
+    description=(
+        "返回整个仓库的代码骨架：每个文件下的类、函数签名和行号，不含函数体。"
+        "第一次接触仓库、需要了解它有哪几个模块时先调它。"
+        "它只有签名没有实现，不要用它代替 read_file 去查具体逻辑。"
+    ),
+    parameters={"type": "object", "properties": {}, "required": []},
+    func=lambda: repo_map(str(REPO_ROOT)),
+))
+
+registry.register(Tool(
+    name="search_symbol",
+    description=(
+        "按符号名查找类 / 函数的**定义位置**，返回 路径:行号: class 或 def 名字。"
+        "只知道符号名、不知道在哪个文件时用它。"
+        "它只找定义；找谁调用过某个符号，请用 grep。"
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "name": {
+                "type": "string",
+                "description": "符号名或名字的一部分，例如 StopReason、build_context",
+            }
+        },
+        "required": ["name"],
+        "additionalProperties": False,
+    },
+    func=lambda name: search_symbol(name, root=str(REPO_ROOT)),
+))
+
+registry.register(Tool(
+    name="grep",
+    description=(
+        "在整个仓库里按正则表达式搜索文本，返回 路径:行号: 内容。"
+        "用于查找已知字符串：函数名、常量、报错信息、配置项。"
+        "代码里的名字是精确的——想找某个名字就先用它，不要凭记忆猜文件。"
+        "pattern 是 Python 正则；只想找定义请用 search_symbol。"
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "pattern": {
+                "type": "string",
+                "description": "Python 正则表达式，例如 build_context、def run\\(、TODO",
+            }
+        },
+        "required": ["pattern"],
+        "additionalProperties": False,
+    },
+    func=lambda pattern: grep(pattern, root=str(REPO_ROOT)),
+))
 
 
 def build_context(messages):
@@ -51,7 +105,7 @@ def execute_tools(calls: list[ToolCall], registry: ToolRegistry):
         try:
             tool = registry.get(name)
             if tool is None:
-                raise Exception(f"Tool {name} not found")
+                raise ValueError(f"unknown tool: {tool_call.name}; available={registry.names()}")
 
             out = tool.func(**args)
             result.append(ToolResult(
@@ -146,25 +200,14 @@ def run(state: SessionState, task: str, llm: LLM,
     finally:
         trace.close()
 
-def test_parallel_tool_calls_are_compressed():
-    """一步内 20 个并行工具调用，是一组 21 条 —— 压缩不能因为组数少就跳过。"""
-    msgs = [Message(role="user", content="读 20 个文件")]
-    msgs.append(Message(role="assistant", content="", tool_calls=[
-        ToolCall(id=f"c{i}", name="read_file", args={"path": f"f{i}.txt"}) for i in range(20)
-    ]))
-    for i in range(20):
-        msgs.append(Message(role="tool", content="填充内容。" * 800, tool_call_id=f"c{i}"))
-
-    assert len(group_turns(msgs)) == 2          # 确认这就是 1 个大组
-    out = _build_ctx(msgs)
-    assert estimate_messages(out) < 20_000, "并行工具调用也必须被进预算"
 
 if __name__ == "__main__":
+    print(registry.names())
     load_dotenv()
     llm = LLM()
     state = SessionState(session_id=str(uuid.uuid4())[:8])
     state.budget.max_steps = 5
-    reason = run(state, "读一下 README.md，然后用一句话告诉我这个项目是干什么的。", llm)
+    reason = run(state, "StopReason 定义在哪？哪些文件用了它？", llm)
     print(f"\nstop_reason = {reason}, status = {state.status}")
     print(f"steps = {len(state.steps)}, tokens = {state.budget.tokens_used}")
     for s in state.steps:

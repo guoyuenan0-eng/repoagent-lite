@@ -147,10 +147,10 @@ def pack_tool_outputs(messages, budget_tokens: int = 20_000,
 
 
 def build_context(messages: list[Message], budget_tokens: int = 20_000) -> list[Message]:
+    if estimate_messages(messages) <= budget_tokens * 0.7:
+        return messages
     # 先按预算压工具输出（长度 + 数量两个维度）
     msgs = pack_tool_outputs(messages, budget_tokens=budget_tokens)
-    if estimate_messages(msgs) <= budget_tokens * 0.7:
-        return msgs
     # 仍超预算，再折叠早期轮次
     return compress(msgs)
 

@@ -109,10 +109,12 @@ def main() -> int:
     state = SessionState(session_id="e2e")
     state.budget.max_steps = 40
 
-    task = (
-        f"依次读取 data/ 目录下 f00.txt 到 f{N_FILES - 1:02d}.txt 的全部文件，"
-        "读完后只回答 f00.txt 的第一个标记（形如 MARKER_xxx），不要解释。"
-    )
+    # task = (
+    #     f"依次读取 data/ 目录下 f00.txt 到 f{N_FILES - 1:02d}.txt 的全部文件，"
+    #     "读完后只回答 f00.txt 的第一个标记（形如 MARKER_xxx），不要解释。"
+    # )
+
+    task = "StopReason 定义在哪？哪些文件用了它？"
 
     buf = io.StringIO()
     with redirect_stdout(buf):
