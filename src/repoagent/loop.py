@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 from repoagent.llm import LLM, TruncatedToolCallError
 from repoagent.retrieval import repo_map, grep, search_symbol
 from repoagent.state import ToolCall, ToolResult, StopReason, SessionState, Message, Status, Step
-from repoagent.tool import ToolRegistry, Tool, read_file
+from repoagent.tool import ToolRegistry, Tool, read_file, list_dir
 from repoagent.context.manager import *
 from repoagent.context.manager import build_context as _build_ctx
 import logging
@@ -39,6 +39,24 @@ registry.register(Tool(
     },
     func=read_file,
 ))
+registry.register(Tool(
+    name="list_dir",
+    description=(
+        "列出某个目录下的文件和子目录。"
+        "不知道文件放在哪、或 read_file 报「文件不存在」时用它确认路径。"
+        "path 相对于仓库根目录，根目录用 \".\"。"
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "相对仓库根目录的目录路径，默认 ."},
+        },
+        "required": [],
+        "additionalProperties": False,
+    },
+    func=lambda path=".": list_dir(path),
+))
+
 registry.register(Tool(
     name="repo_map",
     description=(
