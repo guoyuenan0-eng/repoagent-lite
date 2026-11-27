@@ -7,16 +7,17 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from repoagent.editing import replace_in_file, apply_patch, write_file
 from repoagent.llm import LLM, TruncatedToolCallError
 from repoagent.retrieval import repo_map, grep, search_symbol
 from repoagent.state import ToolCall, ToolResult, StopReason, SessionState, Message, Status, Step
 from repoagent.tool import ToolRegistry, Tool, read_file, list_dir
 from repoagent.context.manager import *
 from repoagent.context.manager import build_context as _build_ctx
+from repoagent import paths
 import logging
 
 log = logging.getLogger(__name__)
-REPO_ROOT = Path(os.getenv("REPOAGENT_ROOT", ".")).resolve()
 registry = ToolRegistry()
 registry.register(Tool(
     name="read_file",
@@ -65,7 +66,7 @@ registry.register(Tool(
         "它只有签名没有实现，不要用它代替 read_file 去查具体逻辑。"
     ),
     parameters={"type": "object", "properties": {}, "required": []},
-    func=lambda: repo_map(str(REPO_ROOT)),
+    func=lambda: repo_map(str(paths.REPO_ROOT)),
 ))
 
 registry.register(Tool(
@@ -86,7 +87,7 @@ registry.register(Tool(
         "required": ["name"],
         "additionalProperties": False,
     },
-    func=lambda name: search_symbol(name, root=str(REPO_ROOT)),
+    func=lambda name: search_symbol(name, root=str(paths.REPO_ROOT)),
 ))
 
 registry.register(Tool(
@@ -108,8 +109,99 @@ registry.register(Tool(
         "required": ["pattern"],
         "additionalProperties": False,
     },
-    func=lambda pattern: grep(pattern, root=str(REPO_ROOT)),
+    func=lambda pattern: grep(pattern, root=str(paths.REPO_ROOT)),
 ))
+
+
+registry.register(Tool(
+    name="edit_file",
+    description=(
+        "把文件里的一段文本精确替换成另一段。这是**修改已有文件的首选方式**。\n"
+        "old_string 必须在文件中**唯一匹配**——如果这段内容出现多次，"
+        "请多带几行上下文（例如把函数签名和它上面一行一起带上），"
+        "否则工具会拒绝执行并告诉你匹配到了几处。\n"
+        "old_string 要原样复制（含缩进），不要省略号、不要改写空白。\n"
+        "需要改很多处分散位置时用 apply_patch；新建文件用 create_file。"
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "相对仓库根目录的文件路径，例如 src/repoagent/state.py",
+            },
+            "old_string": {
+                "type": "string",
+                "description": "要被替换的原文本，必须与文件内容逐字符一致（含缩进）",
+            },
+            "new_string": {
+                "type": "string",
+                "description": "替换后的文本；留空字符串表示删除这段",
+            },
+        },
+        "required": ["path", "old_string", "new_string"],
+        "additionalProperties": False,
+    },
+    func=lambda path, old_string, new_string: str(
+        replace_in_file(path, old_string, new_string)
+    ),
+))
+
+registry.register(Tool(
+    name="apply_patch",
+    description=(
+        "把一个 unified diff（和 git diff 同格式）应用到某个文件。\n"
+        "**当同一文件有多处分散的小改动时用它**，比 edit_file 省大量 token。\n"
+        "格式要求：以 --- / +++ 开头，每个改动块以 @@ 开头；"
+        "每个块的上下文行前面有一个空格，删除行前面是 -，新增行前面是 +。\n"
+        "每处改动建议带 3 行上下文——行号写不精确没关系（工具靠上下文定位），"
+        "但上下文必须能唯一确定位置。\n"
+        "只改一处、或改动很小时用 edit_file 更稳。"
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "相对仓库根目录的文件路径",
+            },
+            "patch": {
+                "type": "string",
+                "description": "标准 unified diff 文本，可包含多个 @@ 块",
+            },
+        },
+        "required": ["path", "patch"],
+        "additionalProperties": False,
+    },
+    func=lambda path, patch: str(apply_patch(path, patch)),
+))
+
+registry.register(Tool(
+    name="create_file",
+    description=(
+        "新建一个文件并写入内容。**只能用于目标文件尚不存在的情况。**\n"
+        "如果文件已存在，工具会拒绝——修改已有文件请用 edit_file 或 apply_patch，"
+        "因为整文件重写会丢掉你没提到的注释和其他代码。\n"
+        "父目录不存在时会自动创建。"
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "相对仓库根目录的文件路径，例如 src/repoagent/editing/patch.py",
+            },
+            "content": {
+                "type": "string",
+                "description": "文件的完整内容",
+            },
+        },
+        "required": ["path", "content"],
+        "additionalProperties": False,
+    },
+    func=lambda path, content: str(write_file(path, content)),
+))
+
 
 
 def build_context(messages):
